@@ -1,5 +1,5 @@
 local physics_engine = {}
-physics_engine.time_step = 1 / 30
+physics_engine.time_step = 1 / 10
 
 local accumulator = 0
 
@@ -14,13 +14,13 @@ end
 function physics_engine:tick(_callback, _time_step)
 	_time_step = _time_step or physics_engine.time_step
 	while accumulator >= _time_step do
-		_callback(_time_step);
-		accumulator = accumulator - _time_step;
+		_callback(_time_step)
+		accumulator = accumulator - _time_step
 	end
 end
 
 function physics_engine:get_alpha()
-	return math.min(accumulator / physics_engine.time_step)
+	return accumulator / physics_engine.time_step
 end
 
 

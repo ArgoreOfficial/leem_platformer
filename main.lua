@@ -8,11 +8,18 @@ math.sign = function(number)
     return number > 0 and 1 or (number == 0 and 0 or -1)
 end
 
+math.lerp = function(a, b, t)
+	return (b * t) + (a * ( 1.0 - t))
+end
+
 local render_canvas = love.graphics.newCanvas(GLOBAL_window_config.width, GLOBAL_window_config.height)
 render_canvas:setFilter("nearest", "nearest", 0)
 
 local tex_tileset_grass = love.graphics.newImage("data/tileset_grass.png")
+tex_tileset_grass:setFilter("nearest", "nearest", 0)
+
 local tex_tileset_dirt  = love.graphics.newImage("data/tileset_dirt.png")
+tex_tileset_dirt:setFilter("nearest", "nearest", 0)
 
 local player_move_wish = vec2(0,0)
 local player_position  = vec2(0,0)
@@ -95,71 +102,150 @@ math.clamp = function(number, min, max)
 end
 
 local player_physics_entity = {
-	_cur_pos = vec2(4,0),
+	_cur_pos = vec2(8.5,8),
 	_old_pos = vec2(0,0),
 	
 	position = vec2(0,0),
-	velocity = vec2(0,0)
+	velocity = vec2(0,0),
+
+	collider_bounds = vec2(4/16, 4/16),
+	intersections = {}
+
 }
 
 function player_physics_entity:get_position(_alpha)
-	return math.lerp(self._cur_pos, self._old_pos, _alpha)
+	return math.lerp(self._old_pos, self._cur_pos, _alpha)
 end
 
-local function entity_physics_tick(_entity, _dt)
--- update
-	_entity.velocity = _entity.velocity + player_move_wish * (50)
-	if cayote_frames < 5 then
-		_entity.velocity = _entity.velocity + vec2(0, 120 * _dt)
+local function aabb(_pos, _width, _height)
+	return {
+		min = vec(_pos),
+		max = _pos + vec2(_width, _height)
+	}
+end
+
+local function sweep_aabb(_aabb, _sweep)
+	return {
+		min = vec2(
+			math.min(_aabb.min.X, _aabb.min.X + _sweep.X),
+			math.min(_aabb.min.Y, _aabb.min.Y + _sweep.Y)
+		),
+		max = vec2(
+			math.max(_aabb.max.X, _aabb.max.X + _sweep.X),
+			math.max(_aabb.max.Y, _aabb.max.Y + _sweep.Y)
+		)
+	}
+end
+
+local function aabb_intersects_aabb(a, b) 
+	return (a.min.X < b.max.X and a.max.X > b.min.X) and
+		   (a.min.Y < b.max.Y and a.max.Y > b.min.Y)
+end
+
+function player_physics_entity:get_aabb()
+	return aabb(
+		self._cur_pos - self.collider_bounds, 
+		self.collider_bounds.X * 2, self.collider_bounds.Y * 2
+	)
+end
+
+function player_physics_entity:get_interpolated_aabb(_alpha)
+	
+	return aabb(
+		self:get_position(_alpha) - self.collider_bounds, 
+		self.collider_bounds.X * 2, self.collider_bounds.Y * 2
+	)
+end
+
+function player_physics_entity:entity_physics_x_pos(_x_delta)
+	local sweep = sweep_aabb(self:get_aabb(), vec2(_x_delta,0))
+	self._cur_pos.X = self._cur_pos.X + _x_delta
+
+	for tile_y = math.floor(sweep.min.Y), math.floor(sweep.max.Y) do
+		for tile_x = math.floor(sweep.min.X), math.floor(sweep.max.X) do
+			if fetch_tile_bit(map, tile_x, tile_y) == 1 then
+				local tile_aabb = aabb(vec2(tile_x, tile_y), 1, 1)
+				local intersected = aabb_intersects_aabb(sweep, tile_aabb)
+				
+				if intersected then
+					if _x_delta > 0 then
+						local new_x = math.min(sweep.max.X, tile_aabb.min.X)
+						self._cur_pos.X = new_x - self.collider_bounds.X
+						self.velocity.X = 0
+					elseif _x_delta < 0 then
+						local new_x = math.max(sweep.min.X, tile_aabb.max.X)
+						self._cur_pos.X = new_x + self.collider_bounds.X
+						self.velocity.X = 0
+					end
+
+					table.insert(self.intersections, tile_aabb)
+				end
+			end
+		end
 	end
+end
+
+function player_physics_entity:entity_physics_y_pos(_y_delta)
+	local sweep = sweep_aabb(self:get_aabb(), vec2(0, _y_delta))
+	
+	self._cur_pos.Y = self._cur_pos.Y + _y_delta
+	
+	for tile_y = math.floor(sweep.min.Y), math.floor(sweep.max.Y) do
+		for tile_x = math.floor(sweep.min.X), math.floor(sweep.max.X) do
+			if fetch_tile_bit(map, tile_x, tile_y) == 1 then
+				local tile_aabb = aabb(vec2(tile_x, tile_y), 1, 1)
+				local intersected = aabb_intersects_aabb(sweep, tile_aabb)
+				
+				if intersected then
+					if _y_delta >= 0 then
+						local new_y = math.min(sweep.max.Y, tile_aabb.min.Y)
+						self._cur_pos.Y = new_y - self.collider_bounds.Y
+						cayote_frames = 10
+						self.velocity.Y = 0
+					elseif _y_delta < 0 then
+						local new_y = math.max(sweep.min.Y, tile_aabb.max.Y)
+						self._cur_pos.Y = new_y + self.collider_bounds.Y
+						self.velocity.Y = 0
+					end
+
+					
+					table.insert(self.intersections, tile_aabb)
+				end
+			end
+		end
+	end
+end
+
+function player_physics_entity:entity_physics_tick(_dt)
+	self.intersections = {}
+
+	-- update
+	self.velocity = self.velocity + player_move_wish * 120 * _dt
+	self.velocity = self.velocity + vec2(0, 120 * _dt)
+	
 	player_move_wish.Y = 0
 
 	-- x damping
-	_entity.velocity.X = _entity.velocity.X - math.sign(_entity.velocity.X)
+	self.velocity.X = self.velocity.X - math.sign(self.velocity.X)
 
 	-- clamping
-	_entity.velocity.X = math.clamp(_entity.velocity.X, -32, 32)
-	_entity.velocity.Y = math.clamp(_entity.velocity.Y, -50, 1000 * _dt)
+	self.velocity.X = math.clamp(self.velocity.X, -10, 10)
+	self.velocity.Y = math.clamp(self.velocity.Y, -50, 1000 * _dt)
 
-	_entity._old_pos = vec(_entity._cur_pos)
+	self._old_pos = vec(self._cur_pos)
 
-	local old_pos = vec2(_entity._cur_pos.X, _entity._cur_pos.Y)
-	
 	-- update Y position
-	_entity._cur_pos.Y = _entity._cur_pos.Y + _entity.velocity.Y * _dt * 0.3
-
-	if fetch_tile_bit(map, math.floor(old_pos.X), math.floor(_entity._cur_pos.Y)) ~= 0 then
-		local delta = _entity.velocity.Y > 0 and math.ceil(old_pos.Y) or math.floor(old_pos.Y)
-		delta = delta - _entity._cur_pos.Y
-
-		_entity._cur_pos.Y = _entity._cur_pos.Y + delta + math.sign(delta) * _dt
-		_entity.velocity.Y = 0
-
-		if delta < 0 then
-			cayote_frames = 2
-		end
-	else
-		cayote_frames = math.max(0, cayote_frames - 1)
-	end
+	local y_delta = self.velocity.Y * _dt * 0.3
+	self:entity_physics_y_pos(y_delta)
 
 	-- update X position
-	_entity._cur_pos.X = _entity._cur_pos.X + _entity.velocity.X * _dt * 0.3
-
-	if fetch_tile_bit(map, math.floor(_entity._cur_pos.X), math.floor(old_pos.Y)) ~= 0 then
-		local delta = _entity.velocity.X > 0 and math.ceil(old_pos.X) or math.floor(old_pos.X)
-		delta = delta - _entity._cur_pos.X
-
-		_entity._cur_pos.X = _entity._cur_pos.X + delta + math.sign(delta) * _dt
-		_entity.velocity.X = 0
-	end
+	local x_delta = self.velocity.X * _dt * 0.3
+	self:entity_physics_x_pos(x_delta)
+	cayote_frames = math.max(0, cayote_frames - 1)
 end
 
 local function physics_update(_dt)
-	entity_physics_tick(player_physics_entity, _dt)
-end
-
-math.lerp = function(a, b, t)
-	return (a * t) + (b * ( 1.0 - t))
+	player_physics_entity:entity_physics_tick(_dt)
 end
 
 function love.update(_dt)
@@ -193,14 +279,9 @@ function love.keyreleased(key, scancode, isrepeat)
 end
 
 local function pos_world_to_screen(_vec)
-	local camera_offset = vec2(
-		math.floor(camera_position.X * 16) / 16,
-		math.floor(camera_position.Y * 16) / 16
-	)
-	
 	return vec2(
-		math.floor((_vec.X - 1.0 - camera_offset.X) * 16), 
-		math.floor((_vec.Y - 1.0 - camera_offset.Y) * 16)
+		(_vec.X - 1.0 - camera_position.X) * 16, 
+		(_vec.Y - 1.0 - camera_position.Y) * 16
 	)
 end
 
@@ -213,17 +294,8 @@ function love.draw()
 
 	local tile_size = 16
 	for_2d(10,15,function(_x, _y)
-		
-		local camera_offset = vec2(
-			math.floor(camera_position.X * 16) / 16,
-			math.floor(camera_position.Y * 16) / 16
-		)
-		
-		local draw_pos = vec2(
-			(_x - 1.0 - camera_offset.X) * tile_size, 
-			(_y - 1.0 - camera_offset.Y) * tile_size
-		)
-		
+		local draw_pos = pos_world_to_screen(vec2(_x, _y))
+
 		if (_x+_y) % 2 == 0 then
 			love.graphics.setColor(1,1,1,1)
 			love.graphics.rectangle("fill", draw_pos.X, draw_pos.Y, tile_size, tile_size)
@@ -240,37 +312,43 @@ function love.draw()
 		local v4 = tileset_bitmask[idx]
 		local quad = tileset_quads[v4.Y][v4.X]
 		
-		local camera_offset = vec2(
-			math.floor(camera_position.X * 16) / 16,
-			math.floor(camera_position.Y * 16) / 16
-		)
-
-		local draw_pos = vec2(
-			(_x - 0.5 - camera_offset.X) * tile_size, 
-			(_y - 0.5 - camera_offset.Y) * tile_size
-		)
+		local draw_pos = pos_world_to_screen(vec2(_x+0.5, _y+0.5))
 
 		love.graphics.setColor(1,1,1,1)
 		love.graphics.draw(tex_tileset_dirt,  quad, draw_pos.X, draw_pos.Y)
 		love.graphics.draw(tex_tileset_grass, quad, draw_pos.X, draw_pos.Y)
 	end)
 	
-	love.graphics.setColor(1,0,0,1)
-	local player_rect_pos = pos_world_to_screen(player_position + vec2(-4/16,-4/16))
-	local player_rect_size = pos_world_to_screen(player_position + vec2(4/16,4/16)) - player_rect_pos
-	love.graphics.rectangle("line", player_rect_pos.X, player_rect_pos.Y, player_rect_size.X, player_rect_size.Y)
-
 	if cayote_frames > 0 then
 		love.graphics.setColor(1,0,1,1)
 		love.graphics.rectangle("fill", 1, 1, 16, 16)
 	end
 
+	local function draw_aabb_world(_aabb)
+		local pos  = pos_world_to_screen(_aabb.min) 
+		local size = pos_world_to_screen(_aabb.max) - pos_world_to_screen(_aabb.min)
+		love.graphics.rectangle("line", pos.X, pos.Y, size.X, size.Y)
+	end
+	
+	local function draw_aabb(_aabb)
+		local pos  = pos_world_to_screen(_aabb.min) 
+		local size = pos_world_to_screen(_aabb.max) - pos_world_to_screen(_aabb.min)
+		love.graphics.rectangle("line", pos.X * 4, pos.Y * 4, size.X * 4, size.Y * 4)
+	end
 
 	love.graphics.setCanvas()
-	
 	love.graphics.setColor(1,1,1,1)
 	love.graphics.draw(render_canvas, 0, 0, 0, GLOBAL_window_config.scale, GLOBAL_window_config.scale)
 	
+	love.graphics.setColor(1,0,0,1)
+	draw_aabb(player_physics_entity:get_aabb())
+	love.graphics.setColor(0,1,0,1)
+	draw_aabb(player_physics_entity:get_interpolated_aabb(physics_engine:get_alpha()))
+	
+	love.graphics.setColor(1,0,0,1)
+	for i = 1, #player_physics_entity.intersections do
+		draw_aabb(player_physics_entity.intersections[i])
+	end
 	
 	_display_print()
 end
