@@ -1,38 +1,33 @@
 local bit32 = require "engine.bit32"
 require "engine.vec"
 
+math.sign = function(number)
+    return number > 0 and 1 or (number == 0 and 0 or -1)
+end
+
 local render_canvas = love.graphics.newCanvas(GLOBAL_window_config.width, GLOBAL_window_config.height)
 render_canvas:setFilter("nearest", "nearest", 0)
 
 local tex_tileset_grass = love.graphics.newImage("data/tileset_grass.png")
 local tex_tileset_dirt  = love.graphics.newImage("data/tileset_dirt.png")
 
-function love.load()
-	love.graphics.setLineStyle("rough") 
-	love.graphics.setLineWidth(1) 
-end
-
-function love.update(_dt)
-	
-end
-
-function love.keypressed(key, scancode, isrepeat)
-	
-end
-
-function love.keyreleased(key, scancode, isrepeat)
-	
-end
+local player_velocity  = vec2(0,0)
+local player_position  = vec2(4.4, 1)
+local player_move_wish = vec2(0,0)
+local camera_position  = vec2(0,0)
+local cayote_frames    = 0 -- 0 if in air, grounded otherwise
 
 local map = {
-	{ 0, 0, 0, 0, 0, 0, 0, 0, },
-	{ 0, 0, 0, 0, 0, 1, 1, 0, },
-	{ 0, 1, 1, 0, 0, 1, 0, 0, },
-	{ 0, 1, 1, 0, 0, 1, 1, 0, },
-	{ 0, 0, 0, 1, 1, 1, 1, 0, },
-	{ 0, 0, 0, 1, 1, 0, 0, 0, },
-	{ 0, 0, 1, 1, 1, 0, 0, 0, },
-	{ 0, 0, 0, 0, 0, 0, 0, 0, },
+	{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+	{ 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1 },
+	{ 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1 },
+	{ 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1 },
+	{ 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1 },
+	{ 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+	{ 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1 },
+	{ 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1 },
+	{ 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1 },
+	{ 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
 }
 
 local function packUnorm4x8(_a, _b, _c, _d)
@@ -75,16 +70,6 @@ end
 
 setup_tileset_quads(4, 4, tex_tileset_grass)
 
-local function draw_tile_rect(_mode, _x, _y, _size)
-	local offset = _mode == "line" and 1 or 0
-
-	love.graphics.rectangle(
-		_mode, 
-		(_x-1) * _size + offset, 
-		(_y-1) * _size + offset, 
-		_size - offset, _size - offset)
-end
-
 local function fetch_tile_bit(_data, _x, _y)
 	return (_data[_y] and _data[_y][_x]) or 0
 end
@@ -97,15 +82,112 @@ local function for_2d(_count_x, _count_y, _func)
 	end
 end
 
+function love.load()
+	love.graphics.setLineStyle("rough") 
+	love.graphics.setLineWidth(1) 
+	render_canvas:setFilter("nearest","nearest")
+end
+
+math.clamp = function(number, min, max)
+	return math.min(max, math.max(min, number))
+end
+
+function love.update(_dt)
+	if cayote_frames < 5 then
+		player_velocity = player_velocity + vec2(0, 1)
+	end
+
+	player_velocity = player_velocity + player_move_wish * 2
+	player_velocity.X = player_velocity.X - math.sign(player_velocity.X)
+	player_velocity.X = math.clamp(player_velocity.X, -32, 32)
+	player_velocity.Y = math.clamp(player_velocity.Y, -50, 80)
+
+	local old_pos = vec2(player_position.X, player_position.Y)
+	
+	-- update Y position
+	player_position.Y = player_position.Y + player_velocity.Y * _dt * 0.3
+
+	if fetch_tile_bit(map, math.floor(old_pos.X), math.floor(player_position.Y)) ~= 0 then
+		local delta = player_velocity.Y > 0 and math.ceil(old_pos.Y) or math.floor(old_pos.Y)
+		delta = delta - player_position.Y
+
+		player_position.Y = player_position.Y + delta + math.sign(delta) * _dt
+		player_velocity.Y = 0
+
+		if delta < 0 then
+			cayote_frames = 16
+		end
+	else
+		cayote_frames = math.max(0, cayote_frames - 1)
+	end
+
+	-- update X position
+	player_position.X = player_position.X + player_velocity.X * _dt * 0.3
+
+	if fetch_tile_bit(map, math.floor(player_position.X), math.floor(old_pos.Y)) ~= 0 then
+		local delta = player_velocity.X > 0 and math.ceil(old_pos.X) or math.floor(old_pos.X)
+		delta = delta - player_position.X
+
+		player_position.X = player_position.X + delta + math.sign(delta) * _dt
+		player_velocity.X = 0
+	end
+	
+	
+	camera_position = vec2(player_position.X - 9, player_position.Y - 6)
+end
+
+function love.keypressed(key, scancode, isrepeat)
+	if scancode == "space" and cayote_frames > 0 then
+		player_velocity.Y = player_velocity.Y - 100
+		cayote_frames = 0
+	end
+
+	if scancode == "a" then
+		player_move_wish.X = player_move_wish.X - 1
+	elseif scancode == "d" then
+		player_move_wish.X = player_move_wish.X + 1
+	end
+end
+
+function love.keyreleased(key, scancode, isrepeat)
+	if scancode == "a" then
+		player_move_wish.X = player_move_wish.X + 1
+	elseif scancode == "d" then
+		player_move_wish.X = player_move_wish.X - 1
+	end
+end
+
+function pos_world_to_screen(_vec)
+	local camera_offset = vec2(
+		math.floor(camera_position.X * 16) / 16,
+		math.floor(camera_position.Y * 16) / 16
+	)
+	
+	return vec2(
+		(_vec.X - 1.0 - camera_offset.X) * 16, 
+		(_vec.Y - 1.0 - camera_offset.Y) * 16
+	)
+end
+
 function love.draw()
 	love.graphics.setCanvas(render_canvas)
-	
+	love.graphics.clear()
+
 	love.graphics.setColor(1,1,1,1)
 	--love.graphics.draw(tex_grid_16)
 
 	local tile_size = 16
 	for_2d(10,15,function(_x, _y)
-		local draw_pos = vec2((_x - 1.0) * tile_size, (_y-1.0) * tile_size)
+		
+		local camera_offset = vec2(
+			math.floor(camera_position.X * 16) / 16,
+			math.floor(camera_position.Y * 16) / 16
+		)
+		
+		local draw_pos = vec2(
+			(_x - 1.0 - camera_offset.X) * tile_size, 
+			(_y - 1.0 - camera_offset.Y) * tile_size
+		)
 		
 		if (_x+_y) % 2 == 0 then
 			love.graphics.setColor(1,1,1,1)
@@ -123,13 +205,31 @@ function love.draw()
 		local v4 = tileset_bitmask[idx]
 		local quad = tileset_quads[v4.Y][v4.X]
 		
-		local draw_pos = vec2((_x - 0.5) * tile_size, (_y-0.5) * tile_size)
+		local camera_offset = vec2(
+			math.floor(camera_position.X * 16) / 16,
+			math.floor(camera_position.Y * 16) / 16
+		)
+
+		local draw_pos = vec2(
+			(_x - 0.5 - camera_offset.X) * tile_size, 
+			(_y - 0.5 - camera_offset.Y) * tile_size
+		)
 
 		love.graphics.setColor(1,1,1,1)
 		love.graphics.draw(tex_tileset_dirt,  quad, draw_pos.X, draw_pos.Y)
 		love.graphics.draw(tex_tileset_grass, quad, draw_pos.X, draw_pos.Y)
 	end)
 	
+	love.graphics.setColor(1,0,0,1)
+	local player_point = pos_world_to_screen(player_position)
+	love.graphics.points(player_point.X, player_point.Y)
+
+	if cayote_frames > 0 then
+		love.graphics.setColor(1,0,1,1)
+		love.graphics.rectangle("fill", 1, 1, 16, 16)
+	end
+
+
 	love.graphics.setCanvas()
 	
 	love.graphics.setColor(1,1,1,1)

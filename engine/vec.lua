@@ -9,6 +9,10 @@ function _G.vec2(_x,_y)
     return vec3(_x,_y,0)
 end
 
+function _G.vec(_vec)
+    return vec3(_vec.X, _vec.Y, _vec.Z)
+end
+
 function vec3_meta.__newindex(t, key, value)
     if key == "x" then error("lowercase .x used on vector, did you mean .X ?") end
     if key == "y" then error("lowercase .y used on vector, did you mean .Y ?") end
