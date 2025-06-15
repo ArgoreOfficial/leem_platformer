@@ -109,7 +109,7 @@ local player_physics_entity = {
 	position = vec2(0,0),
 	velocity = vec2(0,0),
 
-	collider_bounds = vec2(4/16, 4/16),
+	collider_bounds = vec2(4/16, 7/16),
 	intersections = {}
 
 }
@@ -215,12 +215,12 @@ function player_physics_entity:entity_physics_y_pos(_y_delta)
 	end
 end
 
-function player_physics_entity:entity_physics_tick(_dt)
+function player_physics_entity:entity_physics_tick()
 	self.intersections = {}
 
 	local force = vec2(
-		player_force.X * 2,
-		player_force.Y + 2 - (jumping and 50 or 0) 
+		player_force.X * 1,
+		player_force.Y + 2 - (jumping and 55 or 0) 
 	)
 
 	jumping = false
@@ -234,23 +234,23 @@ function player_physics_entity:entity_physics_tick(_dt)
 	end
 
 	-- clamping
-	self.velocity.X = math.clamp(self.velocity.X, -15, 15)
-	self.velocity.Y = math.clamp(self.velocity.Y, -50, 50)
+	self.velocity.X = math.clamp(self.velocity.X, -25, 25)
+	self.velocity.Y = math.clamp(self.velocity.Y, -50000, 130)
 
 	self._old_pos = vec(self._cur_pos)
 
 	-- update Y position
-	local y_delta = self.velocity.Y * _dt * 0.3
+	local y_delta = self.velocity.Y * 0.003
 	self:entity_physics_y_pos(y_delta)
 
 	-- update X position
-	local x_delta = self.velocity.X * _dt * 0.3
+	local x_delta = self.velocity.X * 0.003
 	self:entity_physics_x_pos(x_delta)
 end
 
 local function physics_update(_dt)
 	_clear_print_stack()
-	player_physics_entity:entity_physics_tick(_dt)
+	player_physics_entity:entity_physics_tick()
 end
 
 function love.update(_dt)
