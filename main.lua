@@ -14,12 +14,7 @@ local tex_tileset_grass = love.graphics.newImage("data/tileset_grass.png")
 local tex_tileset_dirt  = love.graphics.newImage("data/tileset_dirt.png")
 
 local player_move_wish = vec2(0,0)
-local player_velocity  = vec2(0,0)
-
-local old_player_position = vec2(4.4, 1)
-local cur_player_position = vec(old_player_position)
-local player_position     = vec(old_player_position)
-
+local player_position  = vec2(0,0)
 local camera_position  = vec2(0,0)
 local cayote_frames    = 0 -- 0 if in air, grounded otherwise
 
@@ -98,47 +93,68 @@ math.clamp = function(number, min, max)
 	return math.min(max, math.max(min, number))
 end
 
-local function physics_update(_dt)
+local player_physics_entity = {
+	_cur_pos = vec2(4,0),
+	_old_pos = vec2(0,0),
+	
+	position = vec2(0,0),
+	velocity = vec2(0,0)
+}
+
+function player_physics_entity:get_position(_alpha)
+	return math.lerp(self._cur_pos, self._old_pos, _alpha)
+end
+
+local function entity_physics_tick(_entity, _dt)
+-- update
+	_entity.velocity = _entity.velocity + player_move_wish * (50)
 	if cayote_frames < 5 then
-		player_velocity = player_velocity + vec2(0, 3)
+		_entity.velocity = _entity.velocity + vec2(0, 120 * _dt)
 	end
+	player_move_wish.Y = 0
 
-	player_velocity = player_velocity + player_move_wish * 4
-	player_velocity.X = player_velocity.X - math.sign(player_velocity.X)
-	player_velocity.X = math.clamp(player_velocity.X, -32, 32)
-	player_velocity.Y = math.clamp(player_velocity.Y, -50, 80)
+	-- x damping
+	_entity.velocity.X = _entity.velocity.X - math.sign(_entity.velocity.X)
 
-	old_player_position = vec(cur_player_position)
+	-- clamping
+	_entity.velocity.X = math.clamp(_entity.velocity.X, -32, 32)
+	_entity.velocity.Y = math.clamp(_entity.velocity.Y, -50, 1000 * _dt)
 
-	local old_pos = vec2(cur_player_position.X, cur_player_position.Y)
+	_entity._old_pos = vec(_entity._cur_pos)
+
+	local old_pos = vec2(_entity._cur_pos.X, _entity._cur_pos.Y)
 	
 	-- update Y position
-	cur_player_position.Y = cur_player_position.Y + player_velocity.Y * _dt * 0.3
+	_entity._cur_pos.Y = _entity._cur_pos.Y + _entity.velocity.Y * _dt * 0.3
 
-	if fetch_tile_bit(map, math.floor(old_pos.X), math.floor(cur_player_position.Y)) ~= 0 then
-		local delta = player_velocity.Y > 0 and math.ceil(old_pos.Y) or math.floor(old_pos.Y)
-		delta = delta - cur_player_position.Y
+	if fetch_tile_bit(map, math.floor(old_pos.X), math.floor(_entity._cur_pos.Y)) ~= 0 then
+		local delta = _entity.velocity.Y > 0 and math.ceil(old_pos.Y) or math.floor(old_pos.Y)
+		delta = delta - _entity._cur_pos.Y
 
-		cur_player_position.Y = cur_player_position.Y + delta + math.sign(delta) * _dt
-		player_velocity.Y = 0
+		_entity._cur_pos.Y = _entity._cur_pos.Y + delta + math.sign(delta) * _dt
+		_entity.velocity.Y = 0
 
 		if delta < 0 then
-			cayote_frames = 16
+			cayote_frames = 2
 		end
 	else
 		cayote_frames = math.max(0, cayote_frames - 1)
 	end
 
 	-- update X position
-	cur_player_position.X = cur_player_position.X + player_velocity.X * _dt * 0.3
+	_entity._cur_pos.X = _entity._cur_pos.X + _entity.velocity.X * _dt * 0.3
 
-	if fetch_tile_bit(map, math.floor(cur_player_position.X), math.floor(old_pos.Y)) ~= 0 then
-		local delta = player_velocity.X > 0 and math.ceil(old_pos.X) or math.floor(old_pos.X)
-		delta = delta - cur_player_position.X
+	if fetch_tile_bit(map, math.floor(_entity._cur_pos.X), math.floor(old_pos.Y)) ~= 0 then
+		local delta = _entity.velocity.X > 0 and math.ceil(old_pos.X) or math.floor(old_pos.X)
+		delta = delta - _entity._cur_pos.X
 
-		cur_player_position.X = cur_player_position.X + delta + math.sign(delta) * _dt
-		player_velocity.X = 0
+		_entity._cur_pos.X = _entity._cur_pos.X + delta + math.sign(delta) * _dt
+		_entity.velocity.X = 0
 	end
+end
+
+local function physics_update(_dt)
+	entity_physics_tick(player_physics_entity, _dt)
 end
 
 math.lerp = function(a, b, t)
@@ -150,14 +166,13 @@ function love.update(_dt)
 	physics_engine:tick(physics_update)
 	local alpha = physics_engine:get_alpha()
 
-	player_position = math.lerp(cur_player_position, old_player_position, alpha)
-
+	player_position = player_physics_entity:get_position(alpha)
 	camera_position = vec2(player_position.X - 9, player_position.Y - 6)
 end
 
 function love.keypressed(key, scancode, isrepeat)
 	if scancode == "space" and cayote_frames > 0 then
-		player_velocity.Y = player_velocity.Y - 32
+		player_move_wish.Y = player_move_wish.Y - 8
 		cayote_frames = 0
 	end
 
@@ -176,15 +191,15 @@ function love.keyreleased(key, scancode, isrepeat)
 	end
 end
 
-function pos_world_to_screen(_vec)
+local function pos_world_to_screen(_vec)
 	local camera_offset = vec2(
 		math.floor(camera_position.X * 16) / 16,
 		math.floor(camera_position.Y * 16) / 16
 	)
 	
 	return vec2(
-		(_vec.X - 1.0 - camera_offset.X) * 16, 
-		(_vec.Y - 1.0 - camera_offset.Y) * 16
+		math.floor((_vec.X - 1.0 - camera_offset.X) * 16), 
+		math.floor((_vec.Y - 1.0 - camera_offset.Y) * 16)
 	)
 end
 
@@ -240,8 +255,9 @@ function love.draw()
 	end)
 	
 	love.graphics.setColor(1,0,0,1)
-	local player_point = pos_world_to_screen(player_position)
-	love.graphics.points(player_point.X, player_point.Y)
+	local player_rect_pos = pos_world_to_screen(player_position + vec2(-4/16,-4/16))
+	local player_rect_size = pos_world_to_screen(player_position + vec2(4/16,4/16)) - player_rect_pos
+	love.graphics.rectangle("line", player_rect_pos.X, player_rect_pos.Y, player_rect_size.X, player_rect_size.Y)
 
 	if cayote_frames > 0 then
 		love.graphics.setColor(1,0,1,1)
