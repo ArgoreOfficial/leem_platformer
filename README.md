@@ -1,2 +1,3 @@
 # leem_platformer
-game :>
+
+requires LÖVE2D 
