@@ -1,5 +1,5 @@
 local physics_engine = {}
-physics_engine.time_step = 1 / 10
+physics_engine.time_step = 0.01
 
 local accumulator = 0
 

@@ -21,10 +21,11 @@ tex_tileset_grass:setFilter("nearest", "nearest", 0)
 local tex_tileset_dirt  = love.graphics.newImage("data/tileset_dirt.png")
 tex_tileset_dirt:setFilter("nearest", "nearest", 0)
 
-local player_move_wish = vec2(0,0)
+local player_force     = vec2(0,0)
 local player_position  = vec2(0,0)
 local camera_position  = vec2(0,0)
-local cayote_frames    = 0 -- 0 if in air, grounded otherwise
+local cayote_time      = 0 -- 0 if in air, grounded otherwise
+local jumping          = false
 
 local map = {
 	{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
@@ -187,7 +188,6 @@ end
 
 function player_physics_entity:entity_physics_y_pos(_y_delta)
 	local sweep = sweep_aabb(self:get_aabb(), vec2(0, _y_delta))
-	
 	self._cur_pos.Y = self._cur_pos.Y + _y_delta
 	
 	for tile_y = math.floor(sweep.min.Y), math.floor(sweep.max.Y) do
@@ -200,14 +200,13 @@ function player_physics_entity:entity_physics_y_pos(_y_delta)
 					if _y_delta >= 0 then
 						local new_y = math.min(sweep.max.Y, tile_aabb.min.Y)
 						self._cur_pos.Y = new_y - self.collider_bounds.Y
-						cayote_frames = 10
+						cayote_time = 0.2
 						self.velocity.Y = 0
 					elseif _y_delta < 0 then
 						local new_y = math.max(sweep.min.Y, tile_aabb.max.Y)
 						self._cur_pos.Y = new_y + self.collider_bounds.Y
 						self.velocity.Y = 0
 					end
-
 					
 					table.insert(self.intersections, tile_aabb)
 				end
@@ -219,18 +218,24 @@ end
 function player_physics_entity:entity_physics_tick(_dt)
 	self.intersections = {}
 
-	-- update
-	self.velocity = self.velocity + player_move_wish * 120 * _dt
-	self.velocity = self.velocity + vec2(0, 120 * _dt)
-	
-	player_move_wish.Y = 0
+	local force = vec2(
+		player_force.X * 2,
+		player_force.Y + 2 - (jumping and 50 or 0) 
+	)
 
+	jumping = false
+	
+	-- update
+	self.velocity = self.velocity + force
+	
 	-- x damping
-	self.velocity.X = self.velocity.X - math.sign(self.velocity.X)
+	if force.X == 0 then
+		self.velocity.X = self.velocity.X - math.sign(self.velocity.X)
+	end
 
 	-- clamping
-	self.velocity.X = math.clamp(self.velocity.X, -10, 10)
-	self.velocity.Y = math.clamp(self.velocity.Y, -50, 1000 * _dt)
+	self.velocity.X = math.clamp(self.velocity.X, -15, 15)
+	self.velocity.Y = math.clamp(self.velocity.Y, -50, 50)
 
 	self._old_pos = vec(self._cur_pos)
 
@@ -241,40 +246,43 @@ function player_physics_entity:entity_physics_tick(_dt)
 	-- update X position
 	local x_delta = self.velocity.X * _dt * 0.3
 	self:entity_physics_x_pos(x_delta)
-	cayote_frames = math.max(0, cayote_frames - 1)
 end
 
 local function physics_update(_dt)
+	_clear_print_stack()
 	player_physics_entity:entity_physics_tick(_dt)
 end
 
 function love.update(_dt)
+
 	physics_engine:update(_dt)
 	physics_engine:tick(physics_update)
 	local alpha = physics_engine:get_alpha()
 
+	cayote_time = math.max(0, cayote_time - _dt)
+	
 	player_position = player_physics_entity:get_position(alpha)
 	camera_position = vec2(player_position.X - 9, player_position.Y - 6)
 end
 
 function love.keypressed(key, scancode, isrepeat)
-	if scancode == "space" and cayote_frames > 0 then
-		player_move_wish.Y = player_move_wish.Y - 8
-		cayote_frames = 0
+	if scancode == "space" and cayote_time > 0 then
+		jumping = true
+		cayote_time = 0
 	end
 
 	if scancode == "a" then
-		player_move_wish.X = player_move_wish.X - 1
+		player_force.X = player_force.X - 1
 	elseif scancode == "d" then
-		player_move_wish.X = player_move_wish.X + 1
+		player_force.X = player_force.X + 1
 	end
 end
 
 function love.keyreleased(key, scancode, isrepeat)
 	if scancode == "a" then
-		player_move_wish.X = player_move_wish.X + 1
+		player_force.X = player_force.X + 1
 	elseif scancode == "d" then
-		player_move_wish.X = player_move_wish.X - 1
+		player_force.X = player_force.X - 1
 	end
 end
 
@@ -319,7 +327,7 @@ function love.draw()
 		love.graphics.draw(tex_tileset_grass, quad, draw_pos.X, draw_pos.Y)
 	end)
 	
-	if cayote_frames > 0 then
+	if cayote_time > 0 then
 		love.graphics.setColor(1,0,1,1)
 		love.graphics.rectangle("fill", 1, 1, 16, 16)
 	end

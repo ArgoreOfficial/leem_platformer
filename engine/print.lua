@@ -20,6 +20,10 @@ function _G._display_print()
     end
 end
 
+function _G._clear_print_stack()
+    _print_stack = {}
+end
+
 function _G.print(...)
     local res = ""
     local pargs = {...}

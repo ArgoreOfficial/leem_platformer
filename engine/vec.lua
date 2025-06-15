@@ -34,11 +34,17 @@ function vec3_meta.__mul(_lhs,_rhs)
             _lhs * _rhs.Y, 
             _lhs * _rhs.Z
         )
-    else
+    elseif type(_rhs) == "number" then
         return vec3(
             _lhs.X * _rhs, 
             _lhs.Y * _rhs, 
             _lhs.Z * _rhs
+        )
+    else
+        return vec3(
+            _lhs.X * _rhs.X, 
+            _lhs.Y * _rhs.Y, 
+            _lhs.Z * _rhs.Z
         )
     end
 end
