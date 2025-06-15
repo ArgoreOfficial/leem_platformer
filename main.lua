@@ -1,5 +1,6 @@
 local bit32 = require "engine.bit32"
 require "engine.vec"
+require "engine.print"
 
 local physics_engine = require "engine.physics_engine"
 
@@ -270,4 +271,6 @@ function love.draw()
 	love.graphics.setColor(1,1,1,1)
 	love.graphics.draw(render_canvas, 0, 0, 0, GLOBAL_window_config.scale, GLOBAL_window_config.scale)
 	
+	
+	_display_print()
 end
