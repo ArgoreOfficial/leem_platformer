@@ -27,7 +27,7 @@ function love.conf(t)
 	t.window.minheight      = 1
 	t.window.fullscreen     = false
 	t.window.fullscreentype = "desktop"
-	t.window.vsync          = 1
+	t.window.vsync          = 0
 	t.window.msaa           = 0
 	t.window.depth          = nil
 	t.window.stencil        = nil
