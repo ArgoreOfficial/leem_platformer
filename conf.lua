@@ -1,7 +1,7 @@
 GLOBAL_window_config = {
-	width = 240,
-	height = 160,
-	scale = 4
+	width = 900,
+	height = 600,
+	scale = 1
 }
 
 -- https://love2d.org/wiki/Config_Files

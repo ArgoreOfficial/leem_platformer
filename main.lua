@@ -1,6 +1,7 @@
 local bit32 = require "engine.bit32"
 require "engine.vec"
 require "engine.print"
+require "engine.animated_sprite"
 
 local physics_engine = require "engine.physics_engine"
 
@@ -9,25 +10,34 @@ math.sign = function(number)
 end
 
 math.lerp = function(a, b, t)
-	return (b * t) + (a * ( 1.0 - t))
+	return (b * t) + (a * (1.0 - t))
 end
 
-local render_canvas = love.graphics.newCanvas(GLOBAL_window_config.width, GLOBAL_window_config.height)
-render_canvas:setFilter("nearest", "nearest", 0)
+local player_force    = vec2(0,0)
+local player_position = vec2(0,0)
+local camera_position = vec2(0,0)
+local cayote_time     = 0 -- 0 if in air, grounded otherwise
+local jumping         = false
+local player_direction = 1
+local player_was_moving = false
 
-local tex_tileset_grass = love.graphics.newImage("data/tileset_grass.png")
-tex_tileset_grass:setFilter("nearest", "nearest", 0)
+G_TILE_SIZE  = 60
+G_SHOW_DEBUG = false
 
-local tex_tileset_dirt  = love.graphics.newImage("data/tileset_dirt.png")
-tex_tileset_dirt:setFilter("nearest", "nearest", 0)
+local map_layers = {}
 
-local player_force     = vec2(0,0)
-local player_position  = vec2(0,0)
-local camera_position  = vec2(0,0)
-local cayote_time      = 0 -- 0 if in air, grounded otherwise
-local jumping          = false
+local function add_map_layer(_texture_path, _data)
+	local tex = nil
+	if _texture_path then 
+		tex = love.graphics.newImage(_texture_path)
+		tex:setFilter("nearest", "nearest", 0)
+	end
 
-local map = {
+	table.insert(map_layers, {image=tex, data=_data})
+end
+
+-- collision layer
+add_map_layer(nil, {
 	{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
 	{ 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1 },
 	{ 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1 },
@@ -38,7 +48,34 @@ local map = {
 	{ 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1 },
 	{ 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1 },
 	{ 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
-}
+})
+
+
+add_map_layer("data/tileset_dirt.png", {
+	{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+	{ 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1 },
+	{ 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1 },
+	{ 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1 },
+	{ 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1 },
+	{ 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+	{ 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1 },
+	{ 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1 },
+	{ 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1 },
+	{ 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
+})
+
+add_map_layer("data/tileset_grass.png", {
+	{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+	{ 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1 },
+	{ 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1 },
+	{ 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1 },
+	{ 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1 },
+	{ 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+	{ 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1 },
+	{ 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1 },
+	{ 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1 },
+	{ 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
+})
 
 local function packUnorm4x8(_a, _b, _c, _d)
 	return bit32.bor(_a, bit32.lshift(_b, 8), bit32.lshift(_c, 16), bit32.lshift(_d, 24))
@@ -78,7 +115,7 @@ local function setup_tileset_quads(_tiles_x, _tiles_y, _image)
 	end
 end
 
-setup_tileset_quads(4, 4, tex_tileset_grass)
+setup_tileset_quads(4, 4, map_layers[2].image)
 
 local function fetch_tile_bit(_data, _x, _y)
 	return (_data[_y] and _data[_y][_x]) or 0
@@ -95,7 +132,6 @@ end
 function love.load()
 	love.graphics.setLineStyle("rough") 
 	love.graphics.setLineWidth(1) 
-	render_canvas:setFilter("nearest","nearest")
 end
 
 math.clamp = function(number, min, max)
@@ -109,7 +145,7 @@ local player_physics_entity = {
 	position = vec2(0,0),
 	velocity = vec2(0,0),
 
-	collider_bounds = vec2(4/16, 7/16),
+	collider_bounds = vec2(0.25, 0.4),
 	intersections = {}
 
 }
@@ -164,7 +200,7 @@ function player_physics_entity:entity_physics_x_pos(_x_delta)
 
 	for tile_y = math.floor(sweep.min.Y), math.floor(sweep.max.Y) do
 		for tile_x = math.floor(sweep.min.X), math.floor(sweep.max.X) do
-			if fetch_tile_bit(map, tile_x, tile_y) == 1 then
+			if fetch_tile_bit(map_layers[1].data, tile_x, tile_y) == 1 then
 				local tile_aabb = aabb(vec2(tile_x, tile_y), 1, 1)
 				local intersected = aabb_intersects_aabb(sweep, tile_aabb)
 				
@@ -192,7 +228,7 @@ function player_physics_entity:entity_physics_y_pos(_y_delta)
 	
 	for tile_y = math.floor(sweep.min.Y), math.floor(sweep.max.Y) do
 		for tile_x = math.floor(sweep.min.X), math.floor(sweep.max.X) do
-			if fetch_tile_bit(map, tile_x, tile_y) == 1 then
+			if fetch_tile_bit(map_layers[1].data, tile_x, tile_y) == 1 then
 				local tile_aabb = aabb(vec2(tile_x, tile_y), 1, 1)
 				local intersected = aabb_intersects_aabb(sweep, tile_aabb)
 				
@@ -234,7 +270,7 @@ function player_physics_entity:entity_physics_tick()
 	end
 
 	-- clamping
-	self.velocity.X = math.clamp(self.velocity.X, -25, 25)
+	self.velocity.X = math.clamp(self.velocity.X, -20, 20)
 	self.velocity.Y = math.clamp(self.velocity.Y, -50000, 130)
 
 	self._old_pos = vec(self._cur_pos)
@@ -253,7 +289,42 @@ local function physics_update(_dt)
 	player_physics_entity:entity_physics_tick()
 end
 
+
+local anim = create_animated_sprite(
+	"data/leem.png", 
+	{
+		{name = "idle", anim_y = 0, anim_start = 0, anim_end = 6},
+		
+		{name = "sit_start", anim_y = 1, anim_start = 0, anim_end = 6},
+		{name = "sit_stop",  anim_y = 1, anim_start = 6, anim_end = 0},
+
+		{name = "spawn", anim_y = 2, anim_start = 0, anim_end = 15},
+		
+		{name = "hang", anim_y = 3, anim_start = 0, anim_end = 5},
+		
+		{name = "jump_start", anim_y = 4, anim_start = 0, anim_end = 2},
+		{name = "fall",       anim_y = 4, anim_start = 2, anim_end = 2},
+		
+		{name = "walk", anim_y = 5, anim_start = 0, anim_end = 7}
+	}
+)
+
+anim:set_animation("idle")
+
 function love.update(_dt)
+	local is_moving = player_force.X ~= 0
+	
+	if is_moving ~= player_was_moving then
+		if not player_was_moving then
+			anim:set_animation("walk")
+		else
+			anim:set_animation("idle")
+		end
+	end
+
+	player_was_moving = is_moving
+
+	anim:update(_dt)
 
 	physics_engine:update(_dt)
 	physics_engine:tick(physics_update)
@@ -273,8 +344,10 @@ function love.keypressed(key, scancode, isrepeat)
 
 	if scancode == "a" then
 		player_force.X = player_force.X - 1
+		player_direction = 1
 	elseif scancode == "d" then
 		player_force.X = player_force.X + 1
+		player_direction = -1
 	end
 end
 
@@ -288,75 +361,79 @@ end
 
 local function pos_world_to_screen(_vec)
 	return vec2(
-		(_vec.X - 1.0 - camera_position.X) * 16, 
-		(_vec.Y - 1.0 - camera_position.Y) * 16
+		(_vec.X - 1.0 - camera_position.X) * G_TILE_SIZE, 
+		(_vec.Y - 1.0 - camera_position.Y) * G_TILE_SIZE
 	)
 end
 
 function love.draw()
-	love.graphics.setCanvas(render_canvas)
 	love.graphics.clear()
 
 	love.graphics.setColor(1,1,1,1)
 	--love.graphics.draw(tex_grid_16)
 
-	local tile_size = 16
 	for_2d(10,15,function(_x, _y)
 		local draw_pos = pos_world_to_screen(vec2(_x, _y))
 
 		if (_x+_y) % 2 == 0 then
 			love.graphics.setColor(1,1,1,1)
-			love.graphics.rectangle("fill", draw_pos.X, draw_pos.Y, tile_size, tile_size)
+			love.graphics.rectangle("fill", draw_pos.X, draw_pos.Y, G_TILE_SIZE, G_TILE_SIZE)
 		end
 	end)
 
-	for_2d(#map,#map[1],function(_x, _y)
-		local a = fetch_tile_bit(map, _x,   _y  )
-		local b = fetch_tile_bit(map, _x+1, _y  )
-		local c = fetch_tile_bit(map, _x,   _y+1)
-		local d = fetch_tile_bit(map, _x+1, _y+1)
-
-		local idx = packUnorm4x8(a, b, c, d)
-		local v4 = tileset_bitmask[idx]
-		local quad = tileset_quads[v4.Y][v4.X]
+	for i = 1, #map_layers do
+		if map_layers[i].image then
+			for_2d(#map_layers[i].data,#map_layers[i].data[1],function(_x, _y)
+				local a = fetch_tile_bit(map_layers[i].data, _x,   _y  )
+				local b = fetch_tile_bit(map_layers[i].data, _x+1, _y  )
+				local c = fetch_tile_bit(map_layers[i].data, _x,   _y+1)
+				local d = fetch_tile_bit(map_layers[i].data, _x+1, _y+1)
 		
-		local draw_pos = pos_world_to_screen(vec2(_x+0.5, _y+0.5))
-
-		love.graphics.setColor(1,1,1,1)
-		love.graphics.draw(tex_tileset_dirt,  quad, draw_pos.X, draw_pos.Y)
-		love.graphics.draw(tex_tileset_grass, quad, draw_pos.X, draw_pos.Y)
-	end)
-	
-	if cayote_time > 0 then
-		love.graphics.setColor(1,0,1,1)
-		love.graphics.rectangle("fill", 1, 1, 16, 16)
+				local idx = packUnorm4x8(a, b, c, d)
+				local v4 = tileset_bitmask[idx]
+				local quad = tileset_quads[v4.Y][v4.X]
+				
+				local draw_pos = pos_world_to_screen(vec2(_x+0.5, _y+0.5))
+		
+				love.graphics.setColor(1,1,1,1)
+				love.graphics.draw(map_layers[i].image, quad, draw_pos.X, draw_pos.Y)
+			end)
+		end
 	end
 
-	local function draw_aabb_world(_aabb)
-		local pos  = pos_world_to_screen(_aabb.min) 
-		local size = pos_world_to_screen(_aabb.max) - pos_world_to_screen(_aabb.min)
-		love.graphics.rectangle("line", pos.X, pos.Y, size.X, size.Y)
+	if cayote_time > 0 then
+		love.graphics.setColor(1,0,1,1)
+		love.graphics.rectangle("fill", 1, 1, G_TILE_SIZE, G_TILE_SIZE)
 	end
 	
 	local function draw_aabb(_aabb)
 		local pos  = pos_world_to_screen(_aabb.min) 
 		local size = pos_world_to_screen(_aabb.max) - pos_world_to_screen(_aabb.min)
-		love.graphics.rectangle("line", pos.X * 4, pos.Y * 4, size.X * 4, size.Y * 4)
+		love.graphics.rectangle(
+			"line", 
+			pos.X * GLOBAL_window_config.scale, 
+			pos.Y * GLOBAL_window_config.scale, 
+			size.X * GLOBAL_window_config.scale, 
+			size.Y * GLOBAL_window_config.scale
+		)
 	end
 
-	love.graphics.setCanvas()
-	love.graphics.setColor(1,1,1,1)
-	love.graphics.draw(render_canvas, 0, 0, 0, GLOBAL_window_config.scale, GLOBAL_window_config.scale)
+	local player_pos_screen = pos_world_to_screen(player_physics_entity:get_position(physics_engine:get_alpha()) - vec2(0, 0.08))
 	
-	love.graphics.setColor(1,0,0,1)
-	draw_aabb(player_physics_entity:get_aabb())
-	love.graphics.setColor(0,1,0,1)
-	draw_aabb(player_physics_entity:get_interpolated_aabb(physics_engine:get_alpha()))
-	
-	love.graphics.setColor(1,0,0,1)
-	for i = 1, #player_physics_entity.intersections do
-		draw_aabb(player_physics_entity.intersections[i])
+	anim:draw(player_pos_screen.X, player_pos_screen.Y, player_direction, 1)
+
+	if G_SHOW_DEBUG then
+		love.graphics.setColor(1,0,0,1)
+		draw_aabb(player_physics_entity:get_aabb())
+		love.graphics.setColor(0,1,0,1)
+		draw_aabb(player_physics_entity:get_interpolated_aabb(physics_engine:get_alpha()))
+		
+		love.graphics.setColor(1,0,0,1)
+		for i = 1, #player_physics_entity.intersections do
+			draw_aabb(player_physics_entity.intersections[i])
+		end
+
+		_display_print()
 	end
 	
-	_display_print()
 end
